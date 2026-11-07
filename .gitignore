@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+.idea/
+
+# generated outputs
+outputs/
+*.log
+
+# model weights (downloaded at Docker build instead)
+*.pt
+*.onnx
+
+# large videos (keep tiny samples only, see note in README)
+data/videos/*.mp4
+data/videos/*.avi
+!data/videos/sample_short.mp4
+
+.env
+.DS_Store
