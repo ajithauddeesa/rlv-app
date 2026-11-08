@@ -32,3 +32,9 @@ def test_low_confidence_reads_ignored():
 def test_most_supported_length_wins():
     r = fuse_readings(reads("AB123", "AB123", "AB123", "AB1234"))
     assert r["text"] == "AB123"
+
+def test_char_probs_weight_positions():
+    rs = [{"text": "AB123", "conf": 0.9, "char_probs": [0.9, 0.9, 0.9, 0.9, 0.9]},
+          {"text": "AB123", "conf": 0.9, "char_probs": [0.9, 0.9, 0.9, 0.9, 0.9]},
+          {"text": "XB123", "conf": 0.9, "char_probs": [0.1, 0.9, 0.9, 0.9, 0.9]}]
+    assert fuse_readings(rs)["text"] == "AB123"
