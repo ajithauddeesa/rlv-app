@@ -48,10 +48,9 @@ def build_events(tracks_data, plates, ocr, line, signal, require_plate=REQUIRE_P
             plate_txt = "plate seen but unreadable"
         else:
             plate_txt = "no plate could be localised on this motorcycle"
-        explanation = (f"Track {tid} {crossing_txt}. Signal: {phase['state']}"
-                       f"{'' if phase['margin_s'] is None else f' (margin {phase['margin_s']}s)'}. "
+        margin_txt = "" if phase["margin_s"] is None else " (margin " + str(phase["margin_s"]) + "s)"
+        explanation = (f"Track {tid} {crossing_txt}. Signal: {phase['state']}{margin_txt}. "
                        f"Verdict: {reason}. {plate_txt.capitalize()}.")
-
         events.append({
             "event_id": f"E{len(events) + 1:03d}",
             "track_id": int(tid),
