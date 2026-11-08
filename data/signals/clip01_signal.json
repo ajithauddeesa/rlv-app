@@ -1,0 +1,10 @@
+{
+  "approach": "main",
+  "clock_offset_s": 0.0,
+  "transition_uncertainty_s": 0.25,
+  "phases": [
+    {"start": 0.0,  "end": 26.25, "state": "GREEN"},
+    {"start": 26.25, "end": 29.25, "state": "YELLOW"},
+    {"start": 29.25, "end": 35.0, "state": "RED"}
+  ]
+}
