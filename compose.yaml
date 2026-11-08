@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data/uploads:/app/data/uploads
+    restart: unless-stopped
+    # Optional GPU acceleration (NVIDIA): install the CUDA build of PyTorch in the
+    # Dockerfile instead of the CPU wheel, install the NVIDIA Container Toolkit on the
+    # host, then uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

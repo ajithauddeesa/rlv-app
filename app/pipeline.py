@@ -70,6 +70,8 @@ def build_events(tracks_data, plates, ocr, line, signal, require_plate=REQUIRE_P
             "ocr_frames_used": o["n_used"] if o else 0,
             "association_confidence": assoc["confidence"],
             "association_note": assoc["note"],
+            "ocr_reads": [{"frame": r["frame"], "text": r["text"], "conf": r["conf"]}
+                          for r in (o["reads"] if o else [])],
             "rear_evidence": [{"frame": d["frame"], "t": d["t"], "plate_bbox": d["plate_bbox"],
                                "det_conf": d["det_conf"], "crop": d["crop"],
                                "frame_image": f"outputs/frames/evidence/frame_{d['frame']:05d}.jpg"}

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red-light event analysis</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --fg:#1d2330; --muted:#667085; --line:#d9dde5;
+          --green:#1a9a4a; --yellow:#d9a400; --red:#d23b3b; --blue:#2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151b; --card:#1b2029; --fg:#e8ebf2; --muted:#9aa4b5; --line:#303846; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  h1 { font-size:18px; margin:0; }
+  main { max-width:1200px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:var(--card);
+           color:var(--fg); cursor:pointer; font:inherit; }
+  button.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line);
+                    border-radius:6px; padding:5px 8px; }
+  input[type=number] { width:90px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
+  .muted { color:var(--muted); }
+  video, canvas { max-width:100%; border-radius:6px; background:#000; }
+  canvas { cursor:crosshair; width:100%; max-width:900px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tr.ev { cursor:pointer; } tr.ev:hover, tr.sel { background:rgba(37,99,235,.10); }
+  .tablewrap { overflow-x:auto; }
+  .badge { padding:2px 8px; border-radius:10px; color:#fff; font-size:12px; }
+  .suspected_violation { background:var(--red); } .not_violation { background:var(--green); }
+  .insufficient_evidence { background:var(--yellow); }
+  .tl { display:flex; height:26px; border-radius:6px; overflow:hidden; margin:8px 0; }
+  .tl div { color:#fff; font-size:12px; text-align:center; line-height:26px; overflow:hidden; }
+  .evgrid { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
+  @media (max-width:800px) { .evgrid { grid-template-columns:1fr; } }
+  .evgrid img { max-width:100%; border-radius:6px; border:1px solid var(--line); }
+  img.crop { image-rendering:pixelated; width:100%; }
+  .thumbs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .thumbs img { width:90px; height:56px; object-fit:cover; cursor:pointer; opacity:.7; }
+  .thumbs img.on { opacity:1; outline:2px solid var(--blue); }
+  textarea { width:100%; height:190px; font-family:ui-monospace, monospace; font-size:12px; }
+  .plate { font-family:ui-monospace, monospace; font-size:20px; letter-spacing:2px; }
+</style>
+</head>
+<body>
+<header><h1>Red-light event analysis &amp; rear-view plate recognition</h1></header>
+<main>
+
+<section>
+  <h2>1. Footage <span class="muted">(one video serves as traffic view and rear-view OCR footage)</span></h2>
+  <div class="row">
+    <input type="file" id="file" accept="video/*">
+    <button id="btnUpload">Upload</button>
+    <button id="btnSample">Use sample clip</button>
+    <span id="vinfo" class="muted">No video loaded.</span>
+  </div>
+  <video id="vid" controls preload="metadata" width="720"></video>
+</section>
+
+<section>
+  <h2>2. Stop line <span class="muted">(click two points on the frame; traffic is assumed to move up the image, toward the line)</span></h2>
+  <div class="row">
+    Frame at <input type="range" id="tslider" min="0" max="10" step="0.5" value="0">
+    <span id="tlabel">0.0 s</span>
+  </div>
+  <canvas id="cv" width="960" height="540"></canvas>
+  <div class="row">
+    x1 <input type="number" id="x1"> y1 <input type="number" id="y1">
+    x2 <input type="number" id="x2"> y2 <input type="number" id="y2">
+    <button id="btnLine">Save stop line</button>
+    <span id="lmsg" class="muted"></span>
+  </div>
+</section>
+
+<section>
+  <h2>3. Traffic signal <span class="muted">(phase times in seconds on the signal clock; video time + offset = signal time)</span></h2>
+  <div id="timeline" class="tl"></div>
+  <textarea id="sigtxt" spellcheck="false"></textarea>
+  <div class="row"><button id="btnSignal">Save signal data</button><span id="smsg" class="muted"></span></div>
+</section>
+
+<section>
+  <h2>4. Analyse</h2>
+  <div class="row">
+    <button id="btnRun" class="primary">Run analysis</button>
+    <span id="status" class="muted">Idle</span>
+  </div>
+  <div id="runinfo" class="muted"></div>
+</section>
+
+<section>
+  <h2>5. Events</h2>
+  <div class="row">
+    <a href="/export.json" download><button>Download JSON</button></a>
+    <a href="/export.csv" download><button>Download CSV</button></a>
+    <span id="evcount" class="muted"></span>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Event</th><th>Track</th><th>Crossing (s)</th><th>Signal</th><th>Status</th>
+        <th>Plate</th><th>OCR conf</th><th>Association</th></tr></thead>
+      <tbody id="evbody"><tr><td colspan="8" class="muted">No events yet. Run an analysis.</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>6. Evidence</h2>
+  <div id="evidence" class="muted">Click an event to inspect it.</div>
+</section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let m = r.statusText;
+    try { m = (await r.json()).detail || m; } catch (e) {}
+    throw new Error(m);
+  }
+  return r.json();
+}
+const postJSON = (url, body) => api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+
+let info = null, line = [0, 1000, 1230, 1000], pts = [], events = [], selected = null, evIdx = 0;
+const img = new Image();
+const COLORS = {GREEN:'#1a9a4a', YELLOW:'#d9a400', RED:'#d23b3b'};
+
+/* ---------- footage ---------- */
+function applyInfo(i) {
+  info = i.loaded ? i : null;
+  if (!info) { $('vinfo').textContent = 'No video loaded.'; return; }
+  $('vinfo').textContent = `${info.width}x${info.height}, ${info.fps.toFixed(1)} fps, ${info.duration_s}s`;
+  $('vid').src = '/api/video?v=' + Date.now();
+  $('tslider').max = Math.max(0, Math.floor(info.duration_s));
+  $('tslider').value = 0; $('tlabel').textContent = '0.0 s';
+  loadFrame();
+}
+$('btnUpload').onclick = async () => {
+  const f = $('file').files[0];
+  if (!f) return alert('Choose a video file first.');
+  const fd = new FormData(); fd.append('file', f);
+  $('vinfo').textContent = 'Uploading...';
+  try { applyInfo(await api('/api/video', {method:'POST', body:fd})); clearEvents(); }
+  catch (e) { $('vinfo').textContent = 'Error: ' + e.message; }
+};
+$('btnSample').onclick = async () => {
+  try { applyInfo(await api('/api/sample', {method:'POST'})); clearEvents(); }
+  catch (e) { $('vinfo').textContent = 'Error: ' + e.message; }
+};
+
+/* ---------- stop line ---------- */
+function loadFrame() {
+  img.onload = draw;
+  img.src = '/api/frame?t=' + $('tslider').value + '&v=' + Date.now();
+}
+$('tslider').oninput = () => { $('tlabel').textContent = Number($('tslider').value).toFixed(1) + ' s'; };
+$('tslider').onchange = loadFrame;
+function draw() {
+  const c = $('cv'), g = c.getContext('2d');
+  if (img.naturalWidth) { c.width = img.naturalWidth; c.height = img.naturalHeight; g.drawImage(img, 0, 0); }
+  g.strokeStyle = 'red'; g.lineWidth = Math.max(3, c.width / 400);
+  g.beginPath(); g.moveTo(line[0], line[1]); g.lineTo(line[2], line[3]); g.stroke();
+  g.fillStyle = 'yellow';
+  for (const [x, y] of [[line[0], line[1]], [line[2], line[3]]]) {
+    g.beginPath(); g.arc(x, y, g.lineWidth * 2, 0, 7); g.fill();
+  }
+}
+function syncInputs() { ['x1','y1','x2','y2'].forEach((k, i) => $(k).value = Math.round(line[i])); }
+async function saveLine() {
+  try {
+    const r = await postJSON('/api/stopline', {x1:+$('x1').value, y1:+$('y1').value, x2:+$('x2').value, y2:+$('y2').value});
+    line = [r.x1, r.y1, r.x2, r.y2]; syncInputs(); draw();
+    $('lmsg').textContent = 'Saved.';
+  } catch (e) { $('lmsg').textContent = 'Error: ' + e.message; }
+}
+$('btnLine').onclick = saveLine;
+$('cv').onclick = e => {
+  const c = e.target, r = c.getBoundingClientRect();
+  const x = Math.round((e.clientX - r.left) * c.width / r.width);
+  const y = Math.round((e.clientY - r.top) * c.height / r.height);
+  pts.push([x, y]);
+  if (pts.length === 1) { line = [x, y, x, y]; syncInputs(); draw(); }
+  else { line = [pts[0][0], pts[0][1], x, y]; pts = []; syncInputs(); draw(); saveLine(); }
+};
+
+/* ---------- signal ---------- */
+function renderTimeline(sig) {
+  const ph = sig.phases || [];
+  $('timeline').innerHTML = ph.map(p =>
+    `<div style="flex:${Math.max(0.1, p.end - p.start)};background:${COLORS[p.state] || '#888'}"
+          title="${esc(p.state)} ${p.start}-${p.end}s">${esc(p.state)} ${p.start}-${p.end}</div>`).join('');
+}
+async function loadSignal() {
+  const s = await api('/api/signal');
+  $('sigtxt').value = JSON.stringify(s, null, 2);
+  renderTimeline(s);
+}
+$('btnSignal').onclick = async () => {
+  try {
+    const r = await postJSON('/api/signal', JSON.parse($('sigtxt').value));
+    $('sigtxt').value = JSON.stringify(r, null, 2); renderTimeline(r);
+    $('smsg').textContent = 'Saved.';
+  } catch (e) { $('smsg').textContent = 'Error: ' + e.message; }
+};
+
+/* ---------- analysis ---------- */
+async function poll() {
+  const s = await api('/api/status');
+  if (s.state === 'running') { $('status').textContent = 'Running: ' + s.stage + '...'; $('btnRun').disabled = true; setTimeout(poll, 1500); return; }
+  $('btnRun').disabled = false;
+  if (s.state === 'error') $('status').textContent = 'Error: ' + s.error;
+  else if (s.state === 'done') { $('status').textContent = 'Done.'; loadEvents(); }
+  else $('status').textContent = 'Idle';
+}
+$('btnRun').onclick = async () => {
+  try { await api('/api/analyze', {method:'POST'}); $('btnRun').disabled = true; $('status').textContent = 'Starting...'; poll(); }
+  catch (e) { $('status').textContent = 'Error: ' + e.message; }
+};
+
+/* ---------- events ---------- */
+function clearEvents() {
+  events = []; $('evbody').innerHTML = '<tr><td colspan="8" class="muted">No events yet. Run an analysis.</td></tr>';
+  $('evcount').textContent = ''; $('runinfo').textContent = ''; $('evidence').textContent = 'Click an event to inspect it.';
+}
+async function loadEvents() {
+  const d = await api('/api/events');
+  events = d.events || [];
+  if (!events.length) { clearEvents(); return; }
+  const n = s => events.filter(e => e.status === s).length;
+  $('evcount').textContent = `${events.length} events: ${n('suspected_violation')} suspected violation, ` +
+    `${n('not_violation')} not a violation, ${n('insufficient_evidence')} insufficient evidence`;
+  if (d.run_info) {
+    const r = d.run_info;
+    $('runinfo').textContent = `Processed ${r.frames} frames (${r.video_duration_s}s of video) in ${r.processing_s}s ` +
+      `on ${r.device.toUpperCase()}: ${r.processing_fps} fps, ${r.seconds_per_video_second} s per video second. ` +
+      `Stages (s): ` + Object.entries(r.stage_seconds).map(([k, v]) => `${k} ${v}`).join(', ');
+  }
+  $('evbody').innerHTML = events.map((e, i) => `
+    <tr class="ev" data-i="${i}">
+      <td>${esc(e.event_id)}</td><td>${e.track_id}</td>
+      <td>${e.crossing_time_s ?? '–'}</td>
+      <td>${esc(e.signal_state)}${e.near_transition ? ' (near change)' : ''}</td>
+      <td><span class="badge ${esc(e.status)}">${esc(e.status.replace(/_/g, ' '))}</span></td>
+      <td class="plate">${esc(e.plate_text)}</td>
+      <td>${e.ocr_confidence}</td>
+      <td>${e.association_confidence ?? '–'}</td>
+    </tr>`).join('');
+  document.querySelectorAll('tr.ev').forEach(tr => tr.onclick = () => select(+tr.dataset.i));
+}
+
+/* ---------- evidence ---------- */
+function select(i) {
+  selected = events[i]; evIdx = 0;
+  document.querySelectorAll('tr.ev').forEach(tr => tr.classList.toggle('sel', +tr.dataset.i === i));
+  const ev = selected.rear_evidence || [];
+  // start with the widest plate crop: usually the clearest observation
+  if (ev.length) {
+    let best = 0, bw = -1;
+    ev.forEach((x, k) => { const w = x.plate_bbox[2] - x.plate_bbox[0]; if (w > bw) { bw = w; best = k; } });
+    evIdx = best;
+  }
+  const t = selected.crossing_time_s ?? (ev[0] ? ev[0].t : null);
+  if (t !== null) { $('vid').currentTime = t; $('vid').pause(); }
+  renderEvidence();
+}
+function renderEvidence() {
+  const e = selected, ev = e.rear_evidence || [];
+  let html = `<p><b>${esc(e.event_id)}</b> &middot; track ${e.track_id} &middot;
+      <span class="badge ${esc(e.status)}">${esc(e.status.replace(/_/g, ' '))}</span></p>
+      <p>${esc(e.explanation)}</p>
+      <p class="muted">Signal ${esc(e.signal_state)} at signal time ${e.signal_time_s ?? '–'}s
+      (margin to change ${e.margin_to_change_s ?? '–'}s). Crossing ${esc(e.crossing_status)} (${esc(e.crossing_reason)}),
+      confidence ${e.crossing_confidence}. Association: ${esc(e.association_note)}.</p>`;
+  if (!ev.length) {
+    html += '<p><b>No rear-view plate observation:</b> the plate detector found no plate on this motorcycle.</p>';
+  } else {
+    const x = ev[evIdx];
+    const reads = (e.ocr_reads || []).map(r =>
+      `<tr ${r.frame === x.frame ? 'style="font-weight:600"' : ''}><td>${r.frame}</td><td class="plate">${esc(r.text || '–')}</td><td>${r.conf}</td></tr>`).join('');
+    html += `<div class="evgrid">
+      <div><div class="muted">Original rear-view frame ${x.frame} (t=${x.t}s). Yellow = motorcycle, red = detected plate</div>
+        <img src="/${esc(x.frame_image)}" alt="rear-view frame">
+        <div class="thumbs">${ev.map((y, k) =>
+          `<img src="/${esc(y.frame_image)}" class="${k === evIdx ? 'on' : ''}" data-k="${k}" title="frame ${y.frame}">`).join('')}</div>
+      </div>
+      <div><div class="muted">Plate crop (detector confidence ${x.det_conf})</div>
+        <img class="crop" src="/${esc(x.crop)}" alt="plate crop">
+        <p>Fused plate: <span class="plate">${esc(e.plate_text)}</span><br>
+        <span class="muted">${esc(e.plate_status)}, ${e.ocr_frames_used} frames used, confidence ${e.ocr_confidence}</span></p>
+        ${reads ? `<table><thead><tr><th>Frame</th><th>OCR read</th><th>Conf</th></tr></thead><tbody>${reads}</tbody></table>` : ''}
+        <p><button id="btnSeek">Jump video to this frame</button></p>
+      </div></div>`;
+  }
+  $('evidence').innerHTML = html;
+  document.querySelectorAll('.thumbs img').forEach(im => im.onclick = () => { evIdx = +im.dataset.k; renderEvidence(); });
+  const sk = $('btnSeek'); if (sk) sk.onclick = () => { $('vid').currentTime = ev[evIdx].t; $('vid').pause(); };
+}
+
+/* ---------- init ---------- */
+(async function init() {
+  try {
+    const [vi, ln] = await Promise.all([api('/api/video/info'), api('/api/stopline')]);
+    line = [ln.x1, ln.y1, ln.x2, ln.y2]; syncInputs();
+    await loadSignal();
+    if (vi.loaded) applyInfo(vi); else draw();
+    const d = await api('/api/events'); if ((d.events || []).length) loadEvents();
+    poll();
+  } catch (e) { $('status').textContent = 'Init error: ' + e.message; }
+})();
+</script>
+</body>
+</html>
