@@ -21,3 +21,5 @@ data/videos/*.avi
 .env
 .DS_Store
 !models/plate_detector.pt
+data/uploads/
+data/stopline.json
